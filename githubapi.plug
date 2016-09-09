@@ -1,0 +1,12 @@
+[Core]
+name = GitHubApi
+module = githubapi
+
+[Documentation]
+description = Retrieves useful information from GitHub based on conversations
+
+[Python]
+version = 3
+
+[Errbot]
+
