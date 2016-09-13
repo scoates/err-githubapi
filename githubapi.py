@@ -14,7 +14,7 @@ class Githubapi(BotPlugin):
     Retrieves useful information from GitHub based on conversations
     """
 
-    issue_message = '[{repo_name}] {title} - owner: {assignee}, opened by: {requester}, milestone: {milestone}.'
+    issue_message = '[{repo_name}] {title} - status: {state} - owner: {assignee}, opened by: {requester}, milestone: {milestone}.'
     issue_body = 'requested by: {user} on {channel}\n\nBe sure to add a body to this issue before assigning it to anyone but yourself.'
 
     patterns = {}
@@ -92,6 +92,7 @@ class Githubapi(BotPlugin):
         self.send(channel_id, self.issue_message.format(
                       repo_name=repo.name,
                       title=issue_or_pull.title,
+                      state=issue_or_pull.state,
                       assignee=assignee,
                       requester=issue_or_pull.user.login,
                       milestone=milestone))
