@@ -99,7 +99,14 @@ class Githubapi(BotPlugin):
 
 
     def callback_message(self, msg):
-        channel_id = self.build_identifier(str(msg.to));
+        if str(msg.frm.nick) == self.bot_identifier.nick:
+            # Ignore all messages from the bot itself
+            return
+
+        if str(msg.to) == self.bot_identifier.nick:
+            channel_id = self.build_identifier(str(msg.frm.nick))
+        else:
+            channel_id = self.build_identifier(str(msg.to));
 
         for pattern in self.patterns.keys():
             match = re.search(self.patterns[pattern]['pattern'], msg.body, re.IGNORECASE)
@@ -118,7 +125,10 @@ class Githubapi(BotPlugin):
         if len(args) < 2:
             return 'No repo or issue title specified. Usage: !issue <repo> <issue title>'
 
-        channel_id = self.build_identifier(str(msg.to));
+        if str(msg.to) == self.bot_identifier.nick:
+            channel_id = self.build_identifier(str(msg.frm.nick))
+        else:
+            channel_id = self.build_identifier(str(msg.to));
 
         repo_name = args.split(' ')[0]
         title = ' '.join(args.split(' ')[1:])
@@ -140,5 +150,4 @@ class Githubapi(BotPlugin):
         except UnknownObjectException:
             return 'The specified repository does not exist: {}'.format(repo_name)
 
-        self._send_issue_data(channel_id, issue, repo)
         return issue.html_url
