@@ -36,11 +36,11 @@ class Githubapi(BotPlugin):
         # Register patterns and callbacks
         self.patterns = {
             'issues': {
-                'pattern': r'https?://github\.com/(\w+/\w+)/issues/(\d+)',
+                'pattern': r'https?://github\.com/([\w-]+/[\w-]+)/issues/(\d+)',
                 'callback': self._get_issue
             },
             'pulls': {
-                'pattern': r'https?://github\.com/(\w+/\w+)/pull/(\d+)',
+                'pattern': r'https?://github\.com/([\w-]+/[\w-]+)/pull/(\d+)',
                 'callback': self._get_pull
             }
         }
