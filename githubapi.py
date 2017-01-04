@@ -99,8 +99,11 @@ class Githubapi(BotPlugin):
 
 
     def callback_message(self, msg):
-        if str(msg.frm.nick) == self.bot_identifier.nick:
-            # Ignore all messages from the bot itself
+        author_nick = str(msg.frm.nick)
+        ignore_nicks = [self.bot_identifier.nick, 'github']
+
+        # Ignore all messages from the bot itself
+        if author_nick in ignore_nicks:
             return
 
         if str(msg.to) == self.bot_identifier.nick:
