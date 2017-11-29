@@ -21,7 +21,7 @@ class Githubapi(BotPlugin):
 
     github_token = ''
     github_conn = None
-    default_org = 'fictivekin'
+    default_org = os.environ.get('GITHUB_ORG', 'fictivekin')
 
     def activate(self):
 
