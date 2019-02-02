@@ -221,16 +221,6 @@ class Githubapi(BotPlugin):
 
         github_event = request.get_header("X-GitHub-Event", None)
 
-        if github_event not in [
-            "commit_comment",  # https://developer.github.com/v3/activity/events/types/#commitcommentevent
-            "issues",  # https://developer.github.com/v3/activity/events/types/#issuesevent
-            "issue_comment",  # https://developer.github.com/v3/activity/events/types/#issuecommentevent
-            "pull_request",  # https://developer.github.com/v3/activity/events/types/#pullrequestevent
-            "push",  # https://developer.github.com/v3/activity/events/types/#pushevent
-        ]:
-            logging.info("Unsupported event: {}".format(github_event))
-            return
-
         payload = request.json
 
         try:
@@ -509,8 +499,10 @@ class Githubapi(BotPlugin):
             self.send(target, message)
 
         else:
-            # no event-specific handler:
-            self.send(target, self._format_event(github_event, payload))
+            logging.info("Unsupported event: {}".format(github_event))
+            logging.info(self._format_event(github_event, payload))
+            return
+
 
     def _send_with_repo_and_url(self, target, message, repo_name, url):
         message = "[{}] {} {}".format(
