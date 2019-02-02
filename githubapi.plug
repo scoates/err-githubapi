@@ -3,10 +3,9 @@ name = GitHubApi
 module = githubapi
 
 [Documentation]
-description = Retrieves useful information from GitHub based on conversations
+description = Retrieves useful information from GitHub based on conversations; relays webhook messages
 
 [Python]
 version = 3
 
 [Errbot]
-
