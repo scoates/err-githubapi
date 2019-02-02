@@ -389,7 +389,7 @@ class Githubapi(BotPlugin):
                 payload['issue']['number'],
                 short)
 
-            self.send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
+            self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
 
 
         elif github_event == "commit_comment":
@@ -403,7 +403,7 @@ class Githubapi(BotPlugin):
                 payload['comment']['commit_id'][:8],
                 short)
 
-            self.send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
+            self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
 
 
         elif github_event == "pull_request":
@@ -424,7 +424,7 @@ class Githubapi(BotPlugin):
                 payload['comment']['commit_id'][:8],
                 short)
 
-            self.send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
+            self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
 
         elif github_event == "status":
             if payload['state'] in ['pending', 'success']:
@@ -548,7 +548,7 @@ class Githubapi(BotPlugin):
                 self._format_name(payload['sender']['login']),
                 payload['number'])
 
-        self.send_with_repo_and_url(target, message, payload['repository']['name'], payload['pull_request']['html_url'])
+        self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['pull_request']['html_url'])
 
 
     def _pull_request_default(self, target, payload):
@@ -563,7 +563,7 @@ class Githubapi(BotPlugin):
             self._format_branch(base_ref),
             self._format_branch(head_ref))
 
-        self.send_with_repo_and_url(target, message, payload['repository']['name'], payload['pull_request']['html_url'])
+        self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['pull_request']['html_url'])
 
 
     def _bold(self, string):
