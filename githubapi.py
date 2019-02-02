@@ -535,8 +535,6 @@ class Githubapi(BotPlugin):
 
     def _short_message(self, message):
         text = message.replace("\r", "\n").replace("\n\n", "\n").split("\n")[0]
-        if self.is_terse_mode():
-            return text[:25]
         return text
 
     def _format_event(self, event_type, payload):
