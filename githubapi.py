@@ -426,69 +426,6 @@ class Githubapi(BotPlugin):
 
             self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
 
-        elif github_event == "status":
-            if payload['state'] in ['pending', 'success']:
-                return
-
-            if payload['context'].lower().startswith('ci/circleci'):
-                logging.debug('checking in circlecci')
-                description = self._circleci.get_build_message(payload)
-            else:
-                description = payload['description']
-
-            message = '[{}/{}] CI status for {} is {} - {} {}'.format(
-                self._format_repo(payload['repository']['name']),
-                self._format_name(payload['context']),
-                self._format_hash(payload['sha'][:8]),
-                self._bold(payload['state']),
-                description,
-                self._remove_utm(payload['target_url']))
-
-            if self._status_shaming and payload['state'] in ['failure', 'success']:
-                committer = None
-
-                if 'commit' in payload and isinstance(payload['commit'], dict):
-                    commit = payload['commit']
-
-                    if ('author' in commit and
-                        isinstance(commit['author'], dict) and
-                        'login' in commit['author'] and
-                        commit['author']['login']):
-
-                        committer = commit['author']['login']
-
-                    elif ('committer' in commit and
-                            isinstance(commit['committer'], dict) and
-                            'login' in commit['committer'] and
-                            commit['committer']['login']):
-
-                        committer = commit['committer'].get('login')
-
-                    elif ('commit' in commit and
-                            isinstance(commit['commit'], dict) and
-                            'author' in commit['commit'] and
-                            isinstance(commit['commit']['author'], dict) and
-                            'name' in commit['commit']['author'] and
-                            commit['commit']['author']['name']):
-
-                        committer = commit['commit']['author']['name']
-
-                    elif ('commit' in commit and
-                            isinstance(commit['commit'], dict) and
-                            'committer' in commit['commit'] and
-                            isinstance(commit['commit']['committer'], dict) and
-                            'name' in commit['commit']['committer'] and
-                            commit['commit']['committer']['name']):
-
-                        committer = commit['commit']['committer']['name']
-
-                if committer and committer != 'web-flow':
-                    message = '{} /cc {}'.format(
-                        message,
-                        self._format_name(committer))
-
-            self.send(target, message)
-
         elif github_event == "ping":
 
             message = '[{}] {} initiated a webhook test: {}'.format(
