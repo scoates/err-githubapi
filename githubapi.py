@@ -381,6 +381,8 @@ class Githubapi(BotPlugin):
             action = 'commented'
             if payload['action'] == 'edited':
                 action = 'edited comment'
+            elif payload['action'] == 'deleted':
+                action = 'deleted comment'
 
             message = '{} {} on {} #{}: {}'.format(
                 self._format_name(payload['sender']['login']),
