@@ -1,24 +1,15 @@
-import logging
-import os
 import re
 import hmac
 import hashlib
-import six
+import urllib.parse as urlparse
+import json
 
-try:
-    import urlparse
-except ImportError:
-    import urllib.parse as urlparse
-
-try:
-    from errbot import BotPlugin, botcmd, webhook
-    import github
-    import github.PaginatedList
-    import github.NamedUser
-    from github.GithubException import UnknownObjectException
-except ImportError as e:
-    # trick the parser
-    raise e
+from errbot import BotPlugin, botcmd, webhook
+from flask import abort
+import github
+import github.PaginatedList
+import github.NamedUser
+from github.GithubException import UnknownObjectException
 
 
 class Githubapi(BotPlugin):
@@ -33,9 +24,8 @@ class Githubapi(BotPlugin):
 
     github_token = ""
     github_conn = None
-    default_org = os.environ.get("GITHUB_ORG", "fictivekin")
 
-    # some of thee are unused
+    # some of these are unused
     EVENT_DESCRIPTIONS = {
         "commit_comment": "{comment[user][login]} commented on {comment[commit_id]} in {repository[full_name]}",
         "create": "{sender[login]} created {ref_type} ({ref}) in {repository[full_name]}",
@@ -61,17 +51,20 @@ class Githubapi(BotPlugin):
         "{repository[full_name]}",
     }
 
+    def get_configuration_template(self):
+        return {
+            "ORG": "facultyco",
+            "DEFAULT_CHANNEL": "faculty",
+            "WEBHOOK_SECRET": "qqq111qq22q3nicetry!",
+            "TOKEN": "nope.",
+        }
+
     def activate(self):
 
-        # Check for presence of github token in environment
-        self.github_token = os.environ.get("GITHUB_TOKEN")
-        if not self.github_token:
-            logging.info(
-                "Cannot load GitHubApi - no GITHUB_TOKEN found in the environment"
-            )
-            return False
-
-        self.github_conn = github.Github(self.github_token)
+        if not self.config:
+            self.log.info("Not configured. Forbidding activation.")
+            return
+        self.github_conn = github.Github(self.config["TOKEN"])
 
         # Register patterns and callbacks
         self.patterns = {
@@ -85,12 +78,12 @@ class Githubapi(BotPlugin):
             },
         }
 
-        super(Githubapi, self).activate()
+        super().activate()
 
     def _get_issue(self, channel_id, match):
         repo_name = match.group(1)
         issue_id = int(match.group(2))
-        logging.debug("Retrieving issue {} from {}".format(issue_id, repo_name))
+        self.log.debug("Retrieving issue {} from {}".format(issue_id, repo_name))
 
         try:
             repo = self.github_conn.get_repo(repo_name)
@@ -104,7 +97,7 @@ class Githubapi(BotPlugin):
     def _get_pull(self, channel_id, match):
         repo_name = match.group(1)
         pull_id = int(match.group(2))
-        logging.debug("Retrieving PR {} from {}".format(pull_id, repo_name))
+        self.log.debug("Retrieving PR {} from {}".format(pull_id, repo_name))
 
         try:
             repo = self.github_conn.get_repo(repo_name)
@@ -139,24 +132,21 @@ class Githubapi(BotPlugin):
         )
 
     def callback_message(self, msg):
-        author_nick = str(msg.frm.nick)
-        ignore_nicks = [self.bot_identifier.nick, "github"]
-
         # Ignore all messages from the bot itself
-        if author_nick in ignore_nicks:
+        if msg.frm == self.bot_identifier:
             return
 
-        if str(msg.to) == self.bot_identifier.nick:
-            channel_id = self.build_identifier(str(msg.frm.nick))
+        if msg.is_direct:
+            reply_to = msg.frm
         else:
-            channel_id = self.build_identifier(str(msg.to))
+            reply_to = msg.to
 
         for pattern in self.patterns.keys():
             match = re.search(
                 self.patterns[pattern]["pattern"], msg.body, re.IGNORECASE
             )
             if match is not None:
-                self.patterns[pattern]["callback"](channel_id, match)
+                self.patterns[pattern]["callback"](reply_to, match)
 
     @botcmd
     def issue(self, msg, args):
@@ -177,7 +167,7 @@ class Githubapi(BotPlugin):
         try:
             repo_name.index("/")
         except ValueError:
-            repo_name = "{}/{}".format(self.default_org, repo_name)
+            repo_name = "{}/{}".format(self.config["ORG"], repo_name)
 
         try:
             repo = self.github_conn.get_repo(repo_name)
@@ -193,53 +183,67 @@ class Githubapi(BotPlugin):
 
         return issue.html_url
 
+    def _has_valid_sig(self, request):
+        data = request.stream.read()
+        sig = request.headers.get("X-Hub-Signature")
 
-    @webhook("/github", raw=True)
-    def notification(self, request):
+        digest = hmac.new(
+            self.config["WEBHOOK_SECRET"].encode("utf-8"), data, hashlib.sha1,
+        ).hexdigest()
 
-        if not getattr(self.bot_config, "GITHUB_RELAY"):
-            logging.info("Can't continue without bot_config.GITHUB_RELAY")
-            return
+        if sig is None:
+            self.log.debug("No signature")
+            return False
 
-        github_secret = getattr(self.bot_config, "GITHUB_SECRET")
-        if github_secret:
-            digest = hmac.new(github_secret.encode("utf-8"), request.body.read(), hashlib.sha1).hexdigest()
+        sig_parts = sig.split("=", 1)
+        if not isinstance(digest, str):
+            digest = str(digest)
 
-            sig = request.get_header('X-Hub-Signature')
-            if sig is None:
-                logging.info("No signature")
-                return
+        if (
+            len(sig_parts) < 2
+            or sig_parts[0] != "sha1"
+            or not hmac.compare_digest(sig_parts[1], digest)
+        ):
+            self.log.debug("Invalid signature")
+            return False
 
-            sig_parts = sig.split('=', 1)
-            if not isinstance(digest, six.text_type):
-                digest = six.text_type(digest)
+        self.log.debug("Valid signature.")
+        return data
 
-            if (len(sig_parts) < 2 or sig_parts[0] != 'sha1' or not hmac.compare_digest(sig_parts[1], digest)):
-                logging.info("Invalid signature")
-                return
+    @webhook("/github/<channel>", raw=True)
+    def notification(self, request, channel):
 
+        github_event = request.headers.get("X-GitHub-Event", None)
 
-        github_event = request.get_header("X-GitHub-Event", None)
+        if self.config["WEBHOOK_SECRET"]:
+            # we only care to validate the sig if there's a secret set
+            req_data = self._has_valid_sig(request)
+            if not req_data:
+                self.log.warn("Invalid signature in request; not relaying")
+                abort(403)
+        else:
+            req_data = request.stream.read()
 
-        payload = request.json
+        # need to do it this way because of the raw request + hash
+        payload = json.loads(req_data)
 
-        try:
-            repo_name = payload["repository"]["name"]
-        except KeyError:
-            logging.info("Payload does not contain a repository name")
-            return
-
-        channel = self.bot_config.GITHUB_RELAY.get(repo_name)
         if not channel:
-            # attempt default
-            channel = self.bot_config.GITHUB_RELAY.get("_default")
-            if not channel:
-                logging.info("No default channel found; abort")
-                return
+            channel = self.config["DEFAULT_CHANNEL"]
+
+        channel = f"#{channel}"
+        found_channel = False
+        for room in self.rooms():
+            if room.room == channel:
+                found_channel = True
+                break
+        if not found_channel:
+            self.log.warn("Can't relay to non-present channels.")
+            abort(404)
+
+        self.log.info(f"Relaying to {channel}")
 
         target = self.build_identifier(channel)
 
-        # borrowed from Jar + https://github.com/fictivekin/
         if github_event in ["push", "create", "delete"]:
             branch_name = payload.get("ref", "").split("/")[-1]
             try:
@@ -368,80 +372,100 @@ class Githubapi(BotPlugin):
                 payload["issue"]["html_url"],
             )
 
-
         elif github_event == "issue_comment":
-            short = self._short_message(payload['comment']['body'])
-            if short != payload['comment']['body']:
-                short = '{}...'.format(short)
+            short = self._short_message(payload["comment"]["body"])
+            if short != payload["comment"]["body"]:
+                short = "{}...".format(short)
 
-            issue_type = 'issue'
-            if payload['issue'].get('pull_request'):
-                issue_type = 'pull request'
+            issue_type = "issue"
+            if payload["issue"].get("pull_request"):
+                issue_type = "pull request"
 
-            action = 'commented'
-            if payload['action'] == 'edited':
-                action = 'edited comment'
-            elif payload['action'] == 'deleted':
-                action = 'deleted comment'
+            action = "commented"
+            if payload["action"] == "edited":
+                action = "edited comment"
+            elif payload["action"] == "deleted":
+                action = "deleted comment"
 
-            message = '{} {} on {} #{}: {}'.format(
-                self._format_name(payload['sender']['login']),
+            message = "{} {} on {} #{}: {}".format(
+                self._format_name(payload["sender"]["login"]),
                 action,
                 issue_type,
-                payload['issue']['number'],
-                short)
+                payload["issue"]["number"],
+                short,
+            )
 
-            self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
-
+            self._send_with_repo_and_url(
+                target,
+                message,
+                payload["repository"]["name"],
+                payload["comment"]["html_url"],
+            )
 
         elif github_event == "commit_comment":
 
-            short = self._short_message(payload['comment']['body'])
-            if short != payload['comment']['body']:
-                short = '{}...'.format(short)
+            short = self._short_message(payload["comment"]["body"])
+            if short != payload["comment"]["body"]:
+                short = "{}...".format(short)
 
-            message = '{} commented on commit {}: {}'.format(
-                self._format_name(payload['sender']['login']),
-                payload['comment']['commit_id'][:8],
-                short)
+            message = "{} commented on commit {}: {}".format(
+                self._format_name(payload["sender"]["login"]),
+                payload["comment"]["commit_id"][:8],
+                short,
+            )
 
-            self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
-
+            self._send_with_repo_and_url(
+                target,
+                message,
+                payload["repository"]["name"],
+                payload["comment"]["html_url"],
+            )
 
         elif github_event == "pull_request":
-            if payload['action'] in ['labeled', 'unlabeled']:
+            if payload["action"] in ["labeled", "unlabeled"]:
                 self._pull_request_labeled(target, payload)
-            elif payload['action'] not in ['assigned', 'synchronize', 'review_requested', 'edited']:
+            elif payload["action"] not in [
+                "assigned",
+                "synchronize",
+                "review_requested",
+                "edited",
+            ]:
                 self._pull_request_default(target, payload)
 
         elif github_event == "pull_request_review_comment":
 
-            short = self._short_message(payload['comment']['body'])
-            if short != payload['comment']['body']:
-                short = '{}...'.format(short)
+            short = self._short_message(payload["comment"]["body"])
+            if short != payload["comment"]["body"]:
+                short = "{}...".format(short)
 
-            message = '{} commented on PR #{} {}: {}'.format(
-                self._format_name(payload['sender']['login']),
-                payload['pull_request']['number'],
-                payload['comment']['commit_id'][:8],
-                short)
+            message = "{} commented on PR #{} {}: {}".format(
+                self._format_name(payload["sender"]["login"]),
+                payload["pull_request"]["number"],
+                payload["comment"]["commit_id"][:8],
+                short,
+            )
 
-            self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['comment']['html_url'])
+            self._send_with_repo_and_url(
+                target,
+                message,
+                payload["repository"]["name"],
+                payload["comment"]["html_url"],
+            )
 
         elif github_event == "ping":
 
-            message = '[{}] {} initiated a webhook test: {}'.format(
-                self._format_repo(payload['repository']['name']),
-                self._format_name(payload['sender']['login']),
-                payload['zen'])
+            message = "[{}] {} initiated a webhook test: {}".format(
+                self._format_repo(payload["repository"]["name"]),
+                self._format_name(payload["sender"]["login"]),
+                payload["zen"],
+            )
 
             self.send(target, message)
 
         else:
-            logging.info("Unsupported event: {}".format(github_event))
-            logging.info(self._format_event(github_event, payload))
+            self.log.warn("Unsupported event: {}".format(github_event))
+            self.log.info(self._format_event(github_event, payload))
             return
-
 
     def _send_with_repo_and_url(self, target, message, repo_name, url):
         message = "[{}] {} {}".format(
@@ -464,7 +488,8 @@ class Githubapi(BotPlugin):
 
         self.send(target, message)
 
-    def _short_message(self, message):
+    @staticmethod
+    def _short_message(message):
         text = message.replace("\r", "\n").replace("\n\n", "\n").split("\n")[0]
         return text
 
@@ -474,47 +499,60 @@ class Githubapi(BotPlugin):
         except KeyError:
             return event_type
 
-
     def _pull_request_labeled(self, target, payload):
-        labels = [label['name'] for label in payload['pull_request']['labels']]
+        labels = [label["name"] for label in payload["pull_request"]["labels"]]
         if labels:
-            message = '{} changed labels on PR #{} to {}'.format(
-                self._format_name(payload['sender']['login']),
-                payload['number'],
-                ' '.join(labels))
+            message = "{} changed labels on PR #{} to {}".format(
+                self._format_name(payload["sender"]["login"]),
+                payload["number"],
+                " ".join(labels),
+            )
         else:
-            message = '{} removed all labels on PR #{}'.format(
-                self._format_name(payload['sender']['login']),
-                payload['number'])
+            message = "{} removed all labels on PR #{}".format(
+                self._format_name(payload["sender"]["login"]), payload["number"]
+            )
 
-        self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['pull_request']['html_url'])
-
+        self._send_with_repo_and_url(
+            target,
+            message,
+            payload["repository"]["name"],
+            payload["pull_request"]["html_url"],
+        )
 
     def _pull_request_default(self, target, payload):
-        base_ref = payload['pull_request']['base']['label'].split(':')[-1]
-        head_ref = payload['pull_request']['head']['label'].split(':')[-1]
+        base_ref = payload["pull_request"]["base"]["label"].split(":")[-1]
+        head_ref = payload["pull_request"]["head"]["label"].split(":")[-1]
 
-        message = '{} {} pull request #{}: {} ({}...{})'.format(
-            self._format_name(payload['sender']['login']),
-            payload['action'],
-            payload['number'],
-            payload['pull_request']['title'],
+        message = "{} {} pull request #{}: {} ({}...{})".format(
+            self._format_name(payload["sender"]["login"]),
+            payload["action"],
+            payload["number"],
+            payload["pull_request"]["title"],
             self._format_branch(base_ref),
-            self._format_branch(head_ref))
+            self._format_branch(head_ref),
+        )
 
-        self._send_with_repo_and_url(target, message, payload['repository']['name'], payload['pull_request']['html_url'])
+        self._send_with_repo_and_url(
+            target,
+            message,
+            payload["repository"]["name"],
+            payload["pull_request"]["html_url"],
+        )
 
-
-    def _bold(self, string):
+    @staticmethod
+    def _bold(string):
         return "**{}**".format(string)
 
-    def _italic(self, string):
+    @staticmethod
+    def _italic(string):
         return "*{}*".format(string)
 
-    def _underline(self, string):
+    @staticmethod
+    def _underline(string):
         return "_{}_".format(string)
 
-    def _color_string(self, color, string):
+    @staticmethod
+    def _color_string(color, string):
         return "`" + string + "`{:color='" + color + "'}"
 
     def _format_url(self, url):
@@ -532,26 +570,35 @@ class Githubapi(BotPlugin):
     def _format_tag(self, tag):
         return self._format_branch(tag)
 
-    def _format_hash(self, hash):
-        return self._color_string("blue", hash)
+    def _format_hash(self, hsh):
+        return self._color_string("blue", hsh)
 
-    def _remove_utm(self, url):
+    @staticmethod
+    def _remove_utm(url):
         parsed = urlparse.urlparse(url)
         params = urlparse.parse_qs(parsed.query)
         clean_params = {}
         for param in params.keys():
-            if not param.startswith('utm_'):
-               clean_params.update({param: params[param]})
+            if not param.startswith("utm_"):
+                clean_params.update({param: params[param]})
 
-        return urlparse.urlunparse((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            parsed.params,
-            '&'.join(['{}={}'.format(key, clean_params[key]) for key in clean_params.keys()]),
-            parsed.fragment
-        ))
+        return urlparse.urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                "&".join(
+                    [
+                        "{}={}".format(key, clean_params[key])
+                        for key in clean_params.keys()
+                    ]
+                ),
+                parsed.fragment,
+            )
+        )
 
-    def shorten_url(self, url):
+    @staticmethod
+    def shorten_url(url):
         # no short for you (yet)
         return url
