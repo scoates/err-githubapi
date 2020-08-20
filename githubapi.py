@@ -3,6 +3,7 @@ import hmac
 import hashlib
 import urllib.parse as urlparse
 import json
+import random
 
 from errbot import BotPlugin, botcmd, webhook
 from flask import abort
