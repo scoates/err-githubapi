@@ -360,7 +360,7 @@ class Githubapi(BotPlugin):
                 return
             message = "{} {} issue #{}: {}".format(
                 self._format_name(payload["sender"]["login"]),
-                payload["action"],
+                payload["action"] + '🎉' if payload["action"] == "closed" else payload["action"],
                 payload["issue"]["number"],
                 payload["issue"]["title"],
             )
